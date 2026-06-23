@@ -1,0 +1,27 @@
+# Config Caddy de base de l'ops-panel.
+# Caddy gère HTTPS automatiquement (Let's Encrypt) sur les vrais domaines.
+# Les routes des "passerelles internet" dessinées dans le canvas sont ajoutées
+# dynamiquement via l'API admin Caddy (module exposure de l'api), pas ici.
+
+{
+	# API d'admin Caddy. En compose, l'api la pilote via http://caddy:2019 sur le
+	# réseau interne `default` (jamais publiée : aucun port 2019 mappé vers l'hôte).
+	# Le bind 0.0.0.0 la rend joignable depuis le conteneur api ; l'isolation vient
+	# de l'absence de mapping de port public, pas du bind.
+	admin 0.0.0.0:2019
+}
+
+# Ops-panel lui-même : web (canvas) + api derrière /api + WebSocket sur /ws.
+# PUBLIC_HOST = vrai domaine en prod (ex: ops.bozando.com) -> HTTPS auto Let's
+# Encrypt. Défaut :80 en dev / IP nue.
+{$PUBLIC_HOST::80} {
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+	handle /ws* {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy web:80
+	}
+}

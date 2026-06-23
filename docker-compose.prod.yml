@@ -1,0 +1,125 @@
+# Compose de PRODUCTION de l'ops-panel — images pré-construites depuis GHCR
+# (pas de build local). Utilisé par install.sh sur un serveur frais.
+# Tous les conteneurs sont bozando.system=true (jamais touchés par prune-orphans).
+#
+# Prérequis (gérés par install.sh) :
+#   - Docker installé + `docker swarm init` exécuté (mode Swarm actif).
+#   - Réseau overlay externe `boz_system` créé : `docker network create -d overlay --attachable boz_system`.
+#   - .env généré (secrets via openssl rand).
+#
+# Variables d'image : GHCR_OWNER + IMAGE_TAG (défaut latest).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-bozando_ops}
+    volumes:
+      - ops_pgdata:/var/lib/postgresql/data
+    labels:
+      bozando.system: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ops_redisdata:/data
+    labels:
+      bozando.system: "true"
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    privileged: true
+    environment:
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      INFO: 1
+      SERVICES: 1
+      TASKS: 1
+      NODES: 1
+      NETWORKS: 1
+      SWARM: 1
+      IMAGES: 1
+      VOLUMES: 1
+      SECRETS: 1
+      POST: 1
+      EXEC: 0
+      CONTAINERS: 0
+      ALLOW_RESTARTS: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      bozando.system: "true"
+
+  api:
+    image: ghcr.io/${GHCR_OWNER:?set in .env}/bozando-ops/api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      socket-proxy:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bozando_ops}
+      REDIS_URL: redis://redis:6379
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      JWT_SECRET: ${JWT_SECRET:?set in .env}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?set in .env}
+      WEB_ORIGIN: ${PUBLIC_URL:?set in .env}
+      DOCKER_HOST: tcp://socket-proxy:2375
+      CADDY_ADMIN_URL: http://caddy:2019
+    networks:
+      - default
+      - boz_system
+    labels:
+      bozando.system: "true"
+
+  web:
+    image: ghcr.io/${GHCR_OWNER:?set in .env}/bozando-ops/web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - api
+    labels:
+      bozando.system: "true"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - default
+      - boz_system
+    labels:
+      bozando.system: "true"
+
+volumes:
+  ops_pgdata:
+  ops_redisdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  boz_system:
+    external: true

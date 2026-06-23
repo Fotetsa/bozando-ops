@@ -1,0 +1,128 @@
+// Schéma Prisma de l'ops-panel.
+// RAPPEL : PostgreSQL est un CACHE de confort. La source de vérité redondante du
+// désiré déployé vit dans les labels Docker bozando.* (voir @bozando-ops/shared).
+// rebuildFromDocker() peut reconstruire ces tables depuis Docker seul.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique // -> bozando.projectId / projectSlug
+  description String?
+  status      String   @default("draft") // draft | deployed | partial | error
+  nodes       Node[]
+  edges       Edge[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Node {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  type String // container | network | volume | gateway
+  name String // unique par projet -> bozando.nodeName
+
+  // Position canvas (React Flow) -> bozando.canvas.x / y
+  posX Float
+  posY Float
+
+  // Config typée selon `type` (validée par les schémas Zod de @bozando-ops/shared)
+  // -> encodée dans bozando.spec
+  config Json
+
+  // ── Runtime observé (rempli par l'observer, NON source de vérité) ──
+  dockerId    String? // containerId / networkId / nom de volume
+  actualState String? // running | exited | created | missing | unknown ...
+  desiredHash String? // -> bozando.desiredHash, diff idempotent
+
+  edgesFrom Edge[] @relation("EdgeSource")
+  edgesTo   Edge[] @relation("EdgeTarget")
+
+  @@unique([projectId, name])
+  @@index([projectId])
+}
+
+model Edge {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  sourceNodeId String
+  targetNodeId String
+  source       Node   @relation("EdgeSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  target       Node   @relation("EdgeTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  kind   String @default("network") // network | volume | gateway
+  config Json?
+
+  @@index([projectId])
+}
+
+// ── V2 : auth multi-utilisateur + audit (prévu, non activé en V1) ──
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         String    @default("owner") // owner | operator | viewer
+  // MFA (otplib v13) — activé dès la V1 pour le compte owner
+  mfaSecretEnc String? // secret TOTP chiffré
+  mfaEnabled   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  auditLogs    AuditLog[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String // deploy | destroy | rebuild | server.provisioned | ...
+  projectId String?
+  nodeId    String?
+  serverId  String?
+  ip        String?
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+// ── Serveurs physiques du cluster Swarm (provisioning SSH one-shot) ──
+model Server {
+  id            String   @id @default(cuid())
+  name          String
+  host          String
+  port          Int      @default(22)
+  user          String   @default("root")
+  role          String // manager | worker
+  status        String   @default("provisioning") // provisioning | ready | error | draining | down
+  swarmNodeId   String? // ID du nœud dans Swarm
+  // Clé OUTIL (générée par l'app) privée chiffrée AES-256-GCM. JAMAIS la clé perso de l'utilisateur.
+  privateKeyEnc String?
+  publicKey     String? // clé-outil publique (déposée dans authorized_keys)
+  hostKeyFp     String? // empreinte SSH connue (TOFU known_hosts)
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ── Credentials de registre Docker (GHCR) — pour pull sur chaque nœud ──
+model RegistryCredential {
+  id        String   @id @default(cuid())
+  registry  String   @default("ghcr.io")
+  username  String
+  tokenEnc  String // token/password chiffré AES-256-GCM
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+

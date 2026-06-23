@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/*
+ * Accessibilité : anneau de focus clavier visible et cohérent sur les éléments
+ * interactifs custom (les composants Medusa UI gèrent déjà le leur). On ne montre
+ * l'anneau qu'au clavier (:focus-visible) pour ne pas polluer le clic souris.
+ */
+:focus-visible {
+  outline: 2px solid var(--border-interactive, #3b82f6);
+  outline-offset: 2px;
+}

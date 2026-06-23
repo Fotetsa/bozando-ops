@@ -1,0 +1,20 @@
+{
+  "name": "bozando-ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ops-panel GNS3-like pour piloter Docker (canvas visuel -> Docker via dockerode)",
+  "workspaces": [
+    "packages/shared",
+    "packages/api",
+    "packages/web"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "overrides": {
+    "browserslist": "4.28.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

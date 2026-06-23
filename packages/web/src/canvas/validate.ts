@@ -1,0 +1,122 @@
+import type { ProjectGraph, Node, Edge } from "@bozando-ops/shared"
+
+/**
+ * Validation de cohérence du graphe AVANT déploiement (référence : Azure "Review +
+ * create" / les linters d'infra). Pur, sans I/O, donc testable et réutilisable.
+ *
+ * On distingue :
+ *  - `errors`   : incohérences qui feront échouer ou rendront inutile le déploiement
+ *                 (passerelle sans cible, conteneur sans image…). Bloquant côté UI.
+ *  - `warnings` : choses probablement non voulues mais déployables (conteneur sans
+ *                 réseau, volume orphelin). Non bloquant.
+ */
+export type Severity = "error" | "warning"
+
+export type ValidationIssue = {
+  severity: Severity
+  nodeId?: string
+  message: string
+}
+
+type ContainerConfig = {
+  image?: string
+  ports?: { host?: number; container: number }[]
+}
+type GatewayConfig = { domain?: string; targetPort?: number }
+
+export function validateGraph(graph: ProjectGraph): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+  const { nodes, edges } = graph
+
+  const containers = nodes.filter((n) => n.type === "container")
+  const gateways = nodes.filter((n) => n.type === "gateway")
+  const volumes = nodes.filter((n) => n.type === "volume")
+
+  // Index des liens par nœud impliqué.
+  const edgesByNode = new Map<string, Edge[]>()
+  for (const e of edges) {
+    edgesByNode.set(e.sourceNodeId, [...(edgesByNode.get(e.sourceNodeId) ?? []), e])
+    edgesByNode.set(e.targetNodeId, [...(edgesByNode.get(e.targetNodeId) ?? []), e])
+  }
+  const hasEdgeOfKind = (nodeId: string, kind: Edge["kind"]) =>
+    (edgesByNode.get(nodeId) ?? []).some((e) => e.kind === kind)
+
+  // ── Conteneurs ──
+  for (const c of containers) {
+    const cfg = c.config as ContainerConfig
+    if (!cfg.image || !String(cfg.image).trim()) {
+      issues.push({ severity: "error", nodeId: c.id, message: `« ${c.name} » : image manquante.` })
+    }
+    if (!hasEdgeOfKind(c.id, "network")) {
+      issues.push({
+        severity: "warning",
+        nodeId: c.id,
+        message: `« ${c.name} » n'est relié à aucun réseau (isolé, joignable seulement via passerelle).`,
+      })
+    }
+  }
+
+  // ── Passerelles : doivent cibler exactement un conteneur ──
+  for (const g of gateways) {
+    const cfg = g.config as GatewayConfig
+    const links = (edgesByNode.get(g.id) ?? []).filter((e) => e.kind === "gateway")
+    if (links.length === 0) {
+      issues.push({
+        severity: "error",
+        nodeId: g.id,
+        message: `Passerelle « ${g.name} » sans conteneur cible : aucune route ne sera créée.`,
+      })
+    }
+    if (!cfg.domain || !String(cfg.domain).trim()) {
+      issues.push({
+        severity: "error",
+        nodeId: g.id,
+        message: `Passerelle « ${g.name} » : domaine manquant.`,
+      })
+    }
+  }
+
+  // ── Volumes orphelins (non montés) ──
+  for (const v of volumes) {
+    if (!hasEdgeOfKind(v.id, "volume")) {
+      issues.push({
+        severity: "warning",
+        nodeId: v.id,
+        message: `Volume « ${v.name} » n'est monté sur aucun conteneur.`,
+      })
+    }
+  }
+
+  // ── Ports hôte publiés en double (conflit garanti au déploiement) ──
+  const hostPorts = new Map<number, string[]>()
+  for (const c of containers) {
+    const cfg = c.config as ContainerConfig
+    for (const p of cfg.ports ?? []) {
+      if (p.host) hostPorts.set(p.host, [...(hostPorts.get(p.host) ?? []), c.name])
+    }
+  }
+  for (const [port, owners] of hostPorts) {
+    if (owners.length > 1) {
+      issues.push({
+        severity: "error",
+        message: `Port hôte ${port} publié par plusieurs conteneurs (${owners.join(", ")}) : conflit.`,
+      })
+    }
+  }
+
+  return issues
+}
+
+/**
+ * État de déploiement d'un nœud par rapport au désiré, pour l'affichage canvas :
+ *  - "deployed" : présent dans Docker (dockerId) et le projet est déployé
+ *  - "pending"  : jamais déployé (pas de dockerId) alors qu'il existe dans le désiré
+ *  - "drift"    : déployé mais le projet a un statut divergent (partial/error)
+ */
+export type NodeDeployState = "deployed" | "pending" | "drift"
+
+export function nodeDeployState(node: Node, projectStatus: string): NodeDeployState {
+  if (!node.dockerId) return "pending"
+  if (projectStatus === "partial" || projectStatus === "error") return "drift"
+  return "deployed"
+}

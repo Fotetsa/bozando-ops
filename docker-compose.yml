@@ -1,0 +1,131 @@
+# Bootstrap de l'ops-panel — déployé HORS de son propre canvas (résout le
+# paradoxe œuf-poule : l'outil ne peut pas se déployer lui-même).
+# Les conteneurs ici sont marqués bozando.system=true pour ne jamais être touchés
+# par prune-orphans.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-bozando_ops}
+    volumes:
+      - ops_pgdata:/var/lib/postgresql/data
+    labels:
+      bozando.system: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ops_redisdata:/data
+    labels:
+      bozando.system: "true"
+
+  # docker-socket-proxy (Tecnativa) : filtre l'API Docker. L'api ne monte PLUS le
+  # socket directement ; elle parle au proxy en TCP. On autorise ce qu'il faut pour
+  # piloter Swarm et on BLOQUE EXEC + écritures conteneur (réduit la surface root).
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    privileged: true
+    environment:
+      # Lecture
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      INFO: 1
+      # Swarm / orchestration (cœur de l'outil)
+      SERVICES: 1
+      TASKS: 1
+      NODES: 1
+      NETWORKS: 1
+      SWARM: 1
+      IMAGES: 1
+      VOLUMES: 1
+      # Autorise les écritures (POST) — requis pour créer services/réseaux/volumes.
+      POST: 1
+      # BLOQUÉ explicitement : exec, conteneurs bruts, montage hôte arbitraire.
+      EXEC: 0
+      CONTAINERS: 0
+      ALLOW_RESTARTS: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      bozando.system: "true"
+
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      socket-proxy:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bozando_ops}
+      REDIS_URL: redis://redis:6379
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      JWT_SECRET: ${JWT_SECRET:?set in .env}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?set in .env}
+      WEB_ORIGIN: ${PUBLIC_URL:-http://localhost:5173}
+      # Pilotage Docker via le proxy filtré (plus de socket monté ici).
+      DOCKER_HOST: tcp://socket-proxy:2375
+      CADDY_ADMIN_URL: http://caddy:2019
+    networks:
+      - default
+      - boz_system
+    labels:
+      bozando.system: "true"
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    labels:
+      bozando.system: "true"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # Caddy rejoint l'overlay système pour résoudre les services exposés par leur
+    # nom DNS Swarm (boz_<slug>_<svc>) sur tous les nœuds du cluster.
+    networks:
+      - default
+      - boz_system
+    labels:
+      bozando.system: "true"
+
+volumes:
+  ops_pgdata:
+  ops_redisdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # Overlay partagé Caddy <-> services exposés (créé par install.sh / le 1er deploy).
+  boz_system:
+    external: true
