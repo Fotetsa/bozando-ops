@@ -19,6 +19,7 @@ import {
 import { exposureService } from "../modules/exposure/service"
 import { ReconcilerService } from "../modules/reconciler/service"
 import { registryService } from "../modules/registry/service"
+import { prisma } from "../lib/prisma"
 
 /**
  * Erreur MÉTIER de déploiement (image indisponible, garde multi-nœuds, secret
@@ -50,6 +51,15 @@ type DeployShared = {
   createdServiceIds: string[]
   createdNetworkIds: string[]
   createdGateways: { nodeName: string }[]
+  /**
+   * État déployé à persister en base APRÈS succès (sinon node.dockerId reste null
+   * et le badge "à déployer" ne disparaît jamais). Pour les nœuds non-conteneur
+   * (réseau/volume/passerelle), il n'y a pas de cycle de vie observable par events
+   * (ils sont "up" dès qu'ils existent) : on fixe actualState="running" ici. Les
+   * conteneurs sont aussi marqués running optimistiquement, puis l'observer prend
+   * le relais en temps réel (running/exited/...).
+   */
+  deployed: Map<string, { dockerId?: string; actualState: "running" }>
 }
 
 // Resolver d'auth registre : déduit le registre du nom d'image (1er segment si
@@ -107,6 +117,7 @@ const networksStep: Step<DeployInput> = {
       const already = existing.find((n) => n.Name === name)
       if (already) {
         s.networkIdByNodeId.set(node.id, already.Id)
+        s.deployed.set(node.id, { dockerId: already.Id, actualState: "running" })
         s.log.push(`réseau ${name} déjà présent`)
         continue
       }
@@ -118,6 +129,7 @@ const networksStep: Step<DeployInput> = {
       const id = (net as { id: string }).id
       s.networkIdByNodeId.set(node.id, id)
       s.createdNetworkIds.push(id)
+      s.deployed.set(node.id, { dockerId: id, actualState: "running" })
       s.log.push(`réseau ${name} créé`)
     }
   },
@@ -138,15 +150,18 @@ const volumesStep: Step<DeployInput> = {
     for (const node of input.graph.nodes.filter((n) => n.type === "volume")) {
       const cfg = parseNodeConfig("volume", node.config) as VolumeConfig
       if (cfg.external) {
+        s.deployed.set(node.id, { actualState: "running" })
         s.log.push(`volume externe ${cfg.externalName} référencé (non géré)`)
         continue
       }
       const name = resourceName(slug, node.name)
       if (existing.find((v) => v.Name === name)) {
+        s.deployed.set(node.id, { actualState: "running" })
         s.log.push(`volume ${name} déjà présent`)
         continue
       }
       await docker.createVolume(name, cfg, labelsFor(input, node))
+      s.deployed.set(node.id, { actualState: "running" })
       s.log.push(`volume ${name} créé`)
     }
   },
@@ -170,6 +185,7 @@ const servicesStep: Step<DeployInput> = {
         continue
       }
       if (action.kind === "noop") {
+        s.deployed.set(action.node.id, { dockerId: action.existingId, actualState: "running" })
         s.log.push(`service ${action.node.name} inchangé`)
         continue
       }
@@ -205,10 +221,13 @@ const servicesStep: Step<DeployInput> = {
         if (action.kind === "update") {
           // ROLLING UPDATE zero-downtime (start-first) — pas de remove+create.
           await docker.updateService(action.existingId, name, cfg, labels, networks, mounts)
+          s.deployed.set(node.id, { dockerId: action.existingId, actualState: "running" })
           s.log.push(`service ${node.name} mis à jour (rolling, ${cfg.replicas} replicas)`)
         } else {
           const svc = await docker.createService(name, cfg, labels, networks, mounts)
-          s.createdServiceIds.push((svc as { id: string }).id)
+          const id = (svc as { id: string }).id
+          s.createdServiceIds.push(id)
+          s.deployed.set(node.id, { dockerId: id, actualState: "running" })
           s.log.push(`service ${node.name} créé (${cfg.replicas} replicas)`)
         }
       } catch (err) {
@@ -251,6 +270,9 @@ const gatewaysStep: Step<DeployInput> = {
       const upstreamHost = resourceName(slug, target.name)
       await exposureService.upsertRoute(slug, node.name, cfg, upstreamHost)
       s.createdGateways.push({ nodeName: node.name })
+      // Une passerelle = une route Caddy : "up" dès qu'elle existe (pas de cycle de
+      // vie observable par events Docker comme un conteneur). On la marque running.
+      s.deployed.set(node.id, { actualState: "running" })
       s.log.push(`passerelle ${cfg.domain} -> ${target.name}:${cfg.targetPort}`)
     }
   },
@@ -322,6 +344,7 @@ export async function deployProjectWorkflow(input: DeployInput) {
     createdServiceIds: [],
     createdNetworkIds: [],
     createdGateways: [],
+    deployed: new Map(),
   }
   const result = await runWorkflow<DeployInput>(
     "deploy-project",
@@ -336,5 +359,24 @@ export async function deployProjectWorkflow(input: DeployInput) {
     if (result.errorCause instanceof DeployError) throw result.errorCause
     throw new Error(result.error || "déploiement échoué")
   }
-  return (result.shared as DeployShared).log
+
+  // Persiste l'état déployé : sans ça node.dockerId reste null → le badge
+  // "à déployer" ne disparaît jamais, et les nœuds sans events (réseau/volume/
+  // passerelle) restent gris. L'observer (conteneurs) affinera ensuite en live.
+  const final = result.shared as DeployShared
+  await Promise.all(
+    [...final.deployed.entries()].map(([nodeId, st]) =>
+      prisma.node
+        .update({
+          where: { id: nodeId },
+          data: {
+            actualState: st.actualState,
+            ...(st.dockerId ? { dockerId: st.dockerId } : {}),
+          },
+        })
+        .catch(() => {})
+    )
+  )
+
+  return final.log
 }

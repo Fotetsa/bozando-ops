@@ -109,14 +109,20 @@ export function validateGraph(graph: ProjectGraph): ValidationIssue[] {
 
 /**
  * État de déploiement d'un nœud par rapport au désiré, pour l'affichage canvas :
- *  - "deployed" : présent dans Docker (dockerId) et le projet est déployé
- *  - "pending"  : jamais déployé (pas de dockerId) alors qu'il existe dans le désiré
- *  - "drift"    : déployé mais le projet a un statut divergent (partial/error)
+ *  - "deployed" : la ressource a été déployée
+ *  - "pending"  : existe dans le désiré mais pas encore déployée
+ *  - "drift"    : déployée mais le projet a un statut divergent (partial/error)
+ *
+ * Un nœud est considéré déployé dès qu'il a un `dockerId` OU un `actualState` non
+ * vide. C'est essentiel pour les nœuds SANS dockerId/cycle de vie observable
+ * (volume, passerelle) : le workflow leur pose actualState="running" au déploiement,
+ * sinon ils resteraient éternellement "à déployer". `missing` (détruit) = pending.
  */
 export type NodeDeployState = "deployed" | "pending" | "drift"
 
 export function nodeDeployState(node: Node, projectStatus: string): NodeDeployState {
-  if (!node.dockerId) return "pending"
+  const deployed = Boolean(node.dockerId) || (!!node.actualState && node.actualState !== "missing")
+  if (!deployed) return "pending"
   if (projectStatus === "partial" || projectStatus === "error") return "drift"
   return "deployed"
 }
