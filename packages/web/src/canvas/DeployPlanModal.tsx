@@ -63,7 +63,8 @@ export function DeployPlanModal({
         <FocusModal.Header>
           <Heading>Revoir et déployer · {graph.name}</Heading>
         </FocusModal.Header>
-        <FocusModal.Body className="flex flex-col gap-5 overflow-y-auto p-6">
+        <FocusModal.Body className="overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-xl flex-col gap-5 px-4 py-8">
           {/* Cohérence */}
           {issues.length > 0 && (
             <div className="flex flex-col gap-2">
@@ -139,6 +140,7 @@ export function DeployPlanModal({
             <Button onClick={onConfirm} isLoading={isDeploying} disabled={blocked}>
               <PlaySolid /> Déployer
             </Button>
+          </div>
           </div>
         </FocusModal.Body>
       </FocusModal.Content>

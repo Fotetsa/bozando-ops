@@ -19,6 +19,7 @@ import { PageHeader, PageContainer } from "../components/PageHeader"
 import { ListContainer, ListRow } from "../components/ListContainer"
 import { ActionMenu } from "../components/ActionMenu"
 import { EmptyState } from "../components/EmptyState"
+import { ModalForm } from "../components/ModalForm"
 
 const ROLE_COLOR: Record<string, "purple" | "blue" | "grey"> = {
   owner: "purple",
@@ -162,52 +163,56 @@ export function UsersPage() {
           <FocusModal.Header>
             <Heading>Nouvel utilisateur</Heading>
           </FocusModal.Header>
-          <FocusModal.Body className="flex flex-col gap-3 p-6">
-            <div>
-              <Label size="small">Email</Label>
-              <Input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="employe@bozando.com"
-                autoComplete="off"
-              />
-            </div>
-            <div>
-              <Label size="small">Mot de passe initial</Label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="8 caractères minimum"
-                autoComplete="new-password"
-              />
-              <Text size="xsmall" className="mt-1 text-ui-fg-muted">
-                L'utilisateur pourra le changer dans Paramètres et activer la MFA.
-              </Text>
-            </div>
-            <div>
-              <Label size="small">Rôle</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as "operator" | "viewer")}>
-                <Select.Trigger>
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  <Select.Item value="viewer">viewer — lecture seule</Select.Item>
-                  <Select.Item value="operator">operator — peut déployer/détruire</Select.Item>
-                </Select.Content>
-              </Select>
-              <Text size="xsmall" className="mt-1 text-ui-fg-muted">
-                La promotion en owner se fait après coup, explicitement, depuis la liste.
-              </Text>
-            </div>
-            <Button
-              onClick={() => createMut.mutate()}
-              isLoading={createMut.isPending}
-              disabled={!canSubmit}
-            >
-              Créer le compte
-            </Button>
+          <FocusModal.Body className="overflow-y-auto">
+            <ModalForm onSubmit={() => canSubmit && createMut.mutate()}>
+              <div>
+                <Label size="small">Email</Label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="employe@bozando.com"
+                  autoComplete="off"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label size="small">Mot de passe initial</Label>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="8 caractères minimum"
+                  autoComplete="new-password"
+                />
+                <Text size="xsmall" className="mt-1 text-ui-fg-muted">
+                  L'utilisateur pourra le changer dans Paramètres et activer la MFA.
+                </Text>
+              </div>
+              <div>
+                <Label size="small">Rôle</Label>
+                <Select value={role} onValueChange={(v) => setRole(v as "operator" | "viewer")}>
+                  <Select.Trigger>
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Item value="viewer">viewer — lecture seule</Select.Item>
+                    <Select.Item value="operator">operator — peut déployer/détruire</Select.Item>
+                  </Select.Content>
+                </Select>
+                <Text size="xsmall" className="mt-1 text-ui-fg-muted">
+                  La promotion en owner se fait après coup, explicitement, depuis la liste.
+                </Text>
+              </div>
+              <div className="mt-2 flex justify-end gap-2">
+                <Button variant="secondary" type="button" onClick={() => setOpen(false)}>
+                  Annuler
+                </Button>
+                <Button type="submit" isLoading={createMut.isPending} disabled={!canSubmit}>
+                  Créer le compte
+                </Button>
+              </div>
+            </ModalForm>
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>

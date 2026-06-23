@@ -19,6 +19,7 @@ import { useConfirmDelete } from "../lib/useConfirmDelete"
 import { PageHeader, PageContainer } from "../components/PageHeader"
 import { ActionMenu } from "../components/ActionMenu"
 import { EmptyState } from "../components/EmptyState"
+import { ModalForm } from "../components/ModalForm"
 
 export function ProjectsPage() {
   const navigate = useNavigate()
@@ -167,30 +168,34 @@ export function ProjectsPage() {
           <FocusModal.Header>
             <Heading>Nouveau projet</Heading>
           </FocusModal.Header>
-          <FocusModal.Body className="flex flex-col gap-3 p-6">
-            <div>
-              <Label size="small">Nom</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Boutique Bozando Prod"
-              />
-            </div>
-            <div>
-              <Label size="small">Description</Label>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="À quoi sert ce projet ?"
-              />
-            </div>
-            <Button
-              onClick={() => createMut.mutate()}
-              isLoading={createMut.isPending}
-              disabled={!name.trim()}
-            >
-              Créer
-            </Button>
+          <FocusModal.Body className="overflow-y-auto">
+            <ModalForm onSubmit={() => name.trim() && createMut.mutate()}>
+              <div>
+                <Label size="small">Nom</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Boutique Bozando Prod"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label size="small">Description</Label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="À quoi sert ce projet ?"
+                />
+              </div>
+              <div className="mt-2 flex justify-end gap-2">
+                <Button variant="secondary" type="button" onClick={() => setCreateOpen(false)}>
+                  Annuler
+                </Button>
+                <Button type="submit" isLoading={createMut.isPending} disabled={!name.trim()}>
+                  Créer
+                </Button>
+              </div>
+            </ModalForm>
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
@@ -201,28 +206,31 @@ export function ProjectsPage() {
           <FocusModal.Header>
             <Heading>Renommer le projet</Heading>
           </FocusModal.Header>
-          <FocusModal.Body className="flex flex-col gap-3 p-6">
-            <div>
-              <Label size="small">Nom</Label>
-              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-              <Text size="xsmall" className="mt-1 text-ui-fg-muted">
-                Le slug technique (préfixe des ressources Docker) ne change pas.
-              </Text>
-            </div>
-            <div>
-              <Label size="small">Description</Label>
-              <Textarea
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-              />
-            </div>
-            <Button
-              onClick={() => updateMut.mutate()}
-              isLoading={updateMut.isPending}
-              disabled={!editName.trim()}
-            >
-              Enregistrer
-            </Button>
+          <FocusModal.Body className="overflow-y-auto">
+            <ModalForm onSubmit={() => editName.trim() && updateMut.mutate()}>
+              <div>
+                <Label size="small">Nom</Label>
+                <Input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus />
+                <Text size="xsmall" className="mt-1 text-ui-fg-muted">
+                  Le slug technique (préfixe des ressources Docker) ne change pas.
+                </Text>
+              </div>
+              <div>
+                <Label size="small">Description</Label>
+                <Textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                />
+              </div>
+              <div className="mt-2 flex justify-end gap-2">
+                <Button variant="secondary" type="button" onClick={() => setEditing(null)}>
+                  Annuler
+                </Button>
+                <Button type="submit" isLoading={updateMut.isPending} disabled={!editName.trim()}>
+                  Enregistrer
+                </Button>
+              </div>
+            </ModalForm>
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>

@@ -20,6 +20,7 @@ import { useConfirmDelete } from "../lib/useConfirmDelete"
 import { useProvisionLog } from "../lib/useProvisionLog"
 import { PageHeader, PageContainer } from "../components/PageHeader"
 import { ActionMenu } from "../components/ActionMenu"
+import { ModalForm } from "../components/ModalForm"
 
 const STATUS_COLOR: Record<string, "green" | "orange" | "red" | "grey"> = {
   ready: "green",
@@ -183,7 +184,13 @@ export function ServersPage() {
           <FocusModal.Header>
             <Heading>Ajouter un serveur</Heading>
           </FocusModal.Header>
-          <FocusModal.Body className="flex flex-col gap-3 overflow-y-auto p-6">
+          <FocusModal.Body className="overflow-y-auto">
+            <ModalForm
+              size="lg"
+              onSubmit={() => {
+                if (name && host && (credType === "key" ? privateKey : password)) provision.mutate()
+              }}
+            >
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label size="small">Nom</Label>
@@ -250,13 +257,18 @@ export function ServersPage() {
               maintenance.
             </Text>
 
-            <Button
-              onClick={() => provision.mutate()}
-              isLoading={provision.isPending}
-              disabled={!name || !host || (credType === "key" ? !privateKey : !password)}
-            >
-              Provisionner
-            </Button>
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="secondary" type="button" onClick={() => setOpen(false)}>
+                Fermer
+              </Button>
+              <Button
+                type="submit"
+                isLoading={provision.isPending}
+                disabled={!name || !host || (credType === "key" ? !privateKey : !password)}
+              >
+                Provisionner
+              </Button>
+            </div>
 
             {lines.length > 0 && (
               <pre
@@ -267,6 +279,7 @@ export function ServersPage() {
                 {lines.map((l) => l.message).join("\n")}
               </pre>
             )}
+            </ModalForm>
           </FocusModal.Body>
         </FocusModal.Content>
       </FocusModal>
