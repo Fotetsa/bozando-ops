@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify"
+import type { FastifyInstance, FastifyRequest  } from "fastify"
 import { z } from "zod"
 import { NodeType, EdgeKind } from "@bozando-ops/shared"
 import { projectsService } from "./service"
@@ -13,9 +13,20 @@ const operator = { preHandler: requireRole("operator") }
  */
 export async function registerProjectRoutes(app: FastifyInstance) {
   // ── Projects ──
-  app.get("/api/projects", async () => projectsService.listProjects())
+  app.get("/api/projects", {
+    schema: {
+      tags: ["projects"],
+      summary: "Liste des projets (viewer+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async () => projectsService.listProjects())
 
-  app.get("/api/projects/:id", async (req, reply) => {
+  app.get("/api/projects/:id", {
+    schema: {
+      tags: ["projects"],
+      summary: "Détail d'un projet (viewer+)"
+    }
+  }, async (req, reply) => {
     const { id } = req.params as { id: string }
     const graph = await projectsService.getProjectGraph(id)
     if (!graph) return reply.code(404).send({ error: "project not found" })
@@ -26,30 +37,51 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     name: z.string().min(1),
     description: z.string().optional(),
   })
-  app.post("/api/projects", operator, async (req, reply) => {
-    const parsed = createProjectBody.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
-    return projectsService.createProject(parsed.data)
+  app.post("/api/projects", {
+    ...operator,
+    schema: {
+      body: createProjectBody,
+      tags: ["projects"],
+      summary: "Création d'un projet (operator+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req) => {
+    return projectsService.createProject(req.body)
   })
 
   const updateProjectBody = z.object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
   })
-  app.patch("/api/projects/:id", operator, async (req, reply) => {
+  app.patch("/api/projects/:id", {
+    ...operator,
+    schema: {
+      body: updateProjectBody,
+      tags: ["projects"],
+      summary: "Mise à jour d'un projet (operator+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const parsed = updateProjectBody.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "invalide" })
-    }
+    // const parsed = updateProjectBody.safeParse(req.body)
+    // if (!parsed.success) {
+    //   return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "invalide" })
+    // }
     try {
-      return await projectsService.updateProject(id, parsed.data)
+      return await projectsService.updateProject(id, req.body)
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
   })
 
-  app.delete("/api/projects/:id", operator, async (req) => {
+  app.delete("/api/projects/:id", {
+    ...operator,
+    schema: {
+      tags: ["projects"],
+      summary: "Suppression d'un projet (operator+) — audité",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req) => {
     const { id } = req.params as { id: string }
     await projectsService.deleteProject(id)
     return { ok: true }
@@ -63,12 +95,20 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     posY: z.number(),
     config: z.record(z.string(), z.unknown()),
   })
-  app.post("/api/projects/:id/nodes", operator, async (req, reply) => {
+  app.post("/api/projects/:id/nodes", {
+    ...operator,
+    schema: {
+      body: createNodeBody,
+      tags: ["projects"],
+      summary: "Création d'un noeud dans un projet (operator+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const parsed = createNodeBody.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
+    // const parsed = createNodeBody.safeParse(req.body)
+    // if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
     try {
-      return await projectsService.createNode({ projectId: id, ...parsed.data })
+      return await projectsService.createNode({ projectId: id, ...req.body })
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -80,18 +120,33 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     posY: z.number().optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })
-  app.post("/api/nodes/:nodeId", operator, async (req, reply) => {
+  app.post("/api/nodes/:nodeId", {
+    ...operator,
+    schema: {
+      body: updateNodeBody,
+      tags: ["projects"],
+      summary: "Mise à jour d'un noeud (operator+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req, reply) => {
     const { nodeId } = req.params as { nodeId: string }
-    const parsed = updateNodeBody.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
+    // const parsed = updateNodeBody.safeParse(req.body)
+    // if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
     try {
-      return await projectsService.updateNode(nodeId, parsed.data)
+      return await projectsService.updateNode(nodeId, req.body)
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
   })
 
-  app.delete("/api/nodes/:nodeId", operator, async (req) => {
+  app.delete("/api/nodes/:nodeId", {
+    ...operator,
+    schema: {
+      tags: ["projects"],
+      summary: "Suppression d'un noeud (operator+) — audité",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req) => {
     const { nodeId } = req.params as { nodeId: string }
     await projectsService.deleteNode(nodeId)
     return { ok: true }
@@ -104,17 +159,25 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     kind: EdgeKind.optional(),
     config: z.record(z.string(), z.unknown()).nullable().optional(),
   })
-  app.post("/api/projects/:id/edges", operator, async (req, reply) => {
+  app.post("/api/projects/:id/edges", {
+    ...operator,
+    schema: {
+      body: createEdgeBody,
+      tags: ["projects"],
+      summary: "Création d'un lien dans un projet (operator+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const parsed = createEdgeBody.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
+    // const parsed = createEdgeBody.safeParse(req.body)
+    // if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
     try {
       return await projectsService.createEdge({
         projectId: id,
-        sourceNodeId: parsed.data.sourceNodeId,
-        targetNodeId: parsed.data.targetNodeId,
-        kind: parsed.data.kind,
-        config: parsed.data.config ?? null,
+        sourceNodeId: req.body.sourceNodeId,
+        targetNodeId: req.body.targetNodeId,
+        kind: req.body.kind,
+        config: req.body.config ?? null,
       })
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
@@ -124,18 +187,33 @@ export async function registerProjectRoutes(app: FastifyInstance) {
   const updateEdgeBody = z.object({
     config: z.record(z.string(), z.unknown()).nullable().optional(),
   })
-  app.post("/api/edges/:edgeId", operator, async (req, reply) => {
+  app.post("/api/edges/:edgeId", {
+    ...operator,
+    schema: {
+      body: updateEdgeBody,
+      tags: ["projects"],
+      summary: "Mise à jour d'un lien (operator+)",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req, reply) => {
     const { edgeId } = req.params as { edgeId: string }
-    const parsed = updateEdgeBody.safeParse(req.body)
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
+    // const parsed = updateEdgeBody.safeParse(req.body)
+    // if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
     try {
-      return await projectsService.updateEdge(edgeId, parsed.data)
+      return await projectsService.updateEdge(edgeId, req.body)
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
   })
 
-  app.delete("/api/edges/:edgeId", operator, async (req) => {
+  app.delete("/api/edges/:edgeId", {
+    ...operator,
+    schema: {
+      tags: ["projects"],
+      summary: "Suppression d'un lien (operator+) — audité",
+      security: [{ bearerAuth: []}],
+    },
+  }, async (req) => {
     const { edgeId } = req.params as { edgeId: string }
     await projectsService.deleteEdge(edgeId)
     return { ok: true }
