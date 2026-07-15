@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [release]
   push:
-    branches: [release]
+    branches: [release, docker-buildx-cache]
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,7 +28,7 @@ jobs:
         run: npx prisma generate --schema packages/api/prisma/schema.prisma
 
       - name: Typecheck (shared + api + web)
-        run: npm run typecheck --workspace @bozando-ops/api
+        run: npm run typecheck
 
   test:
     name: Tests
@@ -39,7 +39,7 @@ jobs:
         node-version: [20, 22]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup nodejs ${{ matrix.node-version }}
         uses: actions/setup-node@v4
