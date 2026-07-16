@@ -4,6 +4,7 @@ import { authService } from "./service"
 import { prisma } from "../../lib/prisma"
 import { requireRole, currentUser } from "./rbac"
 import { eventBus } from "../../lib/event-bus"
+import { rateLimit } from "./rate-limit"
 
 /**
  * Routes d'auth + hook de protection des routes /api/*.
@@ -21,6 +22,13 @@ const PUBLIC_PATHS = new Set([
   "/api/auth/needs-bootstrap",
 ])
 
+const MFA_SETUP_PATHS = new Set([
+  "/api/auth/me",
+  "/api/auth/mfa/enroll",
+  "/api/auth/mfa/confirm",
+  "/api/auth/password",
+])
+
 export function registerAuthGuard(app: FastifyInstance) {
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/api/")) return
@@ -30,7 +38,14 @@ export function registerAuthGuard(app: FastifyInstance) {
     if (!token) return reply.code(401).send({ error: "non authentifié" })
     try {
       const decoded = authService.verifyToken(token)
+      const user = await prisma.user.findUnique({ where: { id: decoded.sub } })
+      if (!user || user.tokenVersion !== decoded.tv) {
+        return reply.code(401).send({ error: "token révoqué" })
+      }
       ;(req as FastifyRequest & { user?: unknown }).user = decoded
+      if (!user.mfaEnabled && !MFA_SETUP_PATHS.has(req.url.split("?")[0] ?? "")) {
+        return reply.code(403).send({ error: "MFA requise", code: "MFA_REQUIRED" })
+      }
     } catch {
       return reply.code(401).send({ error: "token invalide" })
     }
@@ -40,7 +55,7 @@ export function registerAuthGuard(app: FastifyInstance) {
 export async function registerAuthRoutes(app: FastifyInstance) {
   // Bootstrap : crée le compte owner si aucun n'existe.
   const credBody = z.object({ email: z.string().email(), password: z.string().min(8) })
-  app.post("/api/auth/bootstrap", async (req, reply) => {
+  app.post("/api/auth/bootstrap", { preHandler: rateLimit(5) }, async (req, reply) => {
     const parsed = credBody.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
     try {
@@ -57,22 +72,38 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     return { needsBootstrap: (await authService.countUsers()) === 0 }
   })
 
-  app.post("/api/auth/login", async (req, reply) => {
+  app.post("/api/auth/login", { preHandler: rateLimit(5) }, async (req, reply) => {
     const parsed = credBody.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() })
     try {
       return await authService.login(parsed.data.email, parsed.data.password)
     } catch (err) {
+      await eventBus.emit("auth.login.failed", { email: parsed.data.email, ip: req.ip })
       return reply.code(401).send({ error: err instanceof Error ? err.message : String(err) })
     }
   })
 
-  app.post("/api/auth/mfa/verify", async (req, reply) => {
+  app.post("/api/auth/mfa/verify", { preHandler: rateLimit(5) }, async (req, reply) => {
     const body = z.object({ pendingToken: z.string(), code: z.string() }).safeParse(req.body)
     if (!body.success) return reply.code(400).send({ error: body.error.flatten() })
     try {
       return await authService.verifyMfa(body.data.pendingToken, body.data.code)
     } catch (err) {
+      await eventBus.emit("auth.mfa.failed", { ip: req.ip })
+      return reply.code(401).send({ error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
+  app.post("/api/auth/step-up", { preHandler: rateLimit(5) }, async (req, reply) => {
+    const user = (req as FastifyRequest & { user: { sub: string } }).user
+    const body = z.object({ password: z.string().min(1), code: z.string().min(1) }).safeParse(req.body)
+    if (!body.success) return reply.code(400).send({ error: body.error.flatten() })
+    try {
+      const result = await authService.issueStepUpToken(user.sub, body.data.password, body.data.code)
+      await eventBus.emit("auth.step_up.success", { userId: user.sub, ip: req.ip })
+      return result
+    } catch (err) {
+      await eventBus.emit("auth.step_up.failed", { userId: user.sub, ip: req.ip })
       return reply.code(401).send({ error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -88,7 +119,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const body = z.object({ code: z.string() }).safeParse(req.body)
     if (!body.success) return reply.code(400).send({ error: body.error.flatten() })
     try {
-      return await authService.confirmMfaEnrollment(user.sub, body.data.code)
+      const result = await authService.confirmMfaEnrollment(user.sub, body.data.code)
+      await eventBus.emit("mfa.enabled", { userId: user.sub })
+      return result
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -112,11 +145,12 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "invalide" })
     }
     try {
-      return await authService.changePassword(
+      const result = await authService.changePassword(
         user.sub,
         parsed.data.currentPassword,
         parsed.data.newPassword
       )
+      return result
     } catch (err) {
       // Mot de passe actuel incorrect = erreur attendue → 400 message clair.
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) })

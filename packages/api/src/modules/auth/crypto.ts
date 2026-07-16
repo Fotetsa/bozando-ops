@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:crypto"
+import { securityConfig } from "../../config/security"
 
 /**
  * Chiffrement AES-256-GCM des secrets MFA TOTP (calque backend/.../verification/crypto.ts).
@@ -10,6 +11,9 @@ function getKey(): Buffer {
   const hex = process.env.MFA_ENCRYPTION_KEY
   if (hex && /^[0-9a-fA-F]{64}$/.test(hex)) {
     return Buffer.from(hex, "hex")
+  }
+  if (securityConfig.isProd) {
+    throw new Error("MFA_ENCRYPTION_KEY invalide en production")
   }
   const fallback = process.env.JWT_SECRET || "dev-insecure-key"
   return createHash("sha256").update(fallback).digest()

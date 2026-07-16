@@ -4,6 +4,7 @@ import { generateSecret, generateURI, verify as totpVerify } from "otplib"
 import { prisma } from "../../lib/prisma"
 import { encryptSecret, decryptSecret } from "./crypto"
 import type { Role } from "./rbac"
+import { securityConfig } from "../../config/security"
 
 /**
  * Auth de l'ops-panel : compte unique (owner) en V1, mais le modèle User/rôles
@@ -14,12 +15,11 @@ import type { Role } from "./rbac"
  * autre version est résolue, adapter ici.
  */
 
-const TOKEN_TTL = "12h"
-
 // Audiences distinctes : un token de pré-auth MFA ne doit JAMAIS être accepté
 // comme token de session (sinon MFA contournable avec le seul mot de passe).
 const AUD_SESSION = "session"
 const AUD_MFA_PENDING = "mfa-pending"
+const AUD_STEP_UP = "step-up"
 
 function hashPassword(password: string, salt?: string): string {
   const s = salt ?? randomBytes(16).toString("hex")
@@ -64,7 +64,7 @@ export class AuthService {
       )
       return { mfaRequired: true as const, pendingToken: pending }
     }
-    return { mfaRequired: false as const, token: this.issueToken(user.id, user.role) }
+    return { mfaRequired: false as const, token: this.issueToken(user.id, user.role, user.tokenVersion) }
   }
 
   /** Étape 2 du login : vérifie le code TOTP et délivre le token de session. */
@@ -84,7 +84,7 @@ export class AuthService {
     if (!(await totpVerify({ token: code, secret, epochTolerance: 30 })).valid) {
       throw new Error("code invalide")
     }
-    return { token: this.issueToken(user.id, user.role) }
+    return { token: this.issueToken(user.id, user.role, user.tokenVersion) }
   }
 
   /** Démarre l'enrôlement MFA : génère un secret + l'otpauth URI (QR côté front). */
@@ -113,7 +113,10 @@ export class AuthService {
     if (!(await totpVerify({ token: code, secret, epochTolerance: 30 })).valid) {
       throw new Error("code invalide")
     }
-    await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true } })
+    await prisma.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: true, tokenVersion: { increment: 1 } },
+    })
     return { ok: true }
   }
 
@@ -129,7 +132,7 @@ export class AuthService {
     }
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: hashPassword(newPassword) },
+      data: { passwordHash: hashPassword(newPassword), tokenVersion: { increment: 1 } },
     })
     return { ok: true }
   }
@@ -175,7 +178,10 @@ export class AuthService {
       const owners = await prisma.user.count({ where: { role: "owner" } })
       if (owners <= 1) throw new Error("impossible de rétrograder le dernier owner")
     }
-    const u = await prisma.user.update({ where: { id: userId }, data: { role } })
+    const u = await prisma.user.update({
+      where: { id: userId },
+      data: { role, tokenVersion: { increment: 1 } },
+    })
     return { id: u.id, email: u.email, role: u.role }
   }
 
@@ -194,25 +200,66 @@ export class AuthService {
     return { ok: true as const }
   }
 
-  issueToken(userId: string, role: string): string {
+  async issueStepUpToken(
+    userId: string,
+    password: string,
+    code: string
+  ): Promise<{ token: string; expiresAt: string }> {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
+    if (!verifyPassword(password, user.passwordHash)) throw new Error("identifiants invalides")
+    if (!user.mfaSecretEnc || !user.mfaEnabled) throw new Error("MFA requise")
+    const secret = decryptSecret(user.mfaSecretEnc)
+    if (!(await totpVerify({ token: code, secret, epochTolerance: 30 })).valid) {
+      throw new Error("code invalide")
+    }
+    const expiresAt = new Date(Date.now() + ttlToMs(securityConfig.stepUpTtl)).toISOString()
+    return {
+      token: jwt.sign({ sub: user.id, tv: user.tokenVersion }, process.env.JWT_SECRET as string, {
+        expiresIn: securityConfig.stepUpTtl,
+        audience: AUD_STEP_UP,
+      }),
+      expiresAt,
+    }
+  }
+
+  async verifyStepUpToken(token: string): Promise<{ sub: string }> {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string, {
+      audience: AUD_STEP_UP,
+    }) as { sub?: string; tv?: number }
+    if (!decoded.sub || typeof decoded.tv !== "number") throw new Error("step-up invalide")
+    const user = await prisma.user.findUnique({ where: { id: decoded.sub } })
+    if (!user || user.tokenVersion !== decoded.tv) throw new Error("step-up révoqué")
+    return { sub: decoded.sub }
+  }
+
+  issueToken(userId: string, role: string, tokenVersion = 0): string {
     // Audience session : seul ce type de token est accepté par verifyToken / la
     // garde /api/* / le handshake WebSocket.
-    return jwt.sign({ sub: userId, role }, process.env.JWT_SECRET as string, {
-      expiresIn: TOKEN_TTL,
+    return jwt.sign({ sub: userId, role, tv: tokenVersion }, process.env.JWT_SECRET as string, {
+      expiresIn: securityConfig.sessionTtl,
       audience: AUD_SESSION,
     })
   }
 
-  verifyToken(token: string): { sub: string; role: string } {
+  verifyToken(token: string): { sub: string; role: string; tv: number } {
     // audience: AUD_SESSION rejette tout token mfa-pending (jwt lève si aud != session).
     const decoded = jwt.verify(token, process.env.JWT_SECRET as string, {
       audience: AUD_SESSION,
-    }) as { sub?: string; role?: string; mfa?: string }
-    if (decoded.mfa || !decoded.role || !decoded.sub) {
+    }) as { sub?: string; role?: string; mfa?: string; tv?: number }
+    if (decoded.mfa || !decoded.role || !decoded.sub || typeof decoded.tv !== "number") {
       throw new Error("token de session invalide")
     }
-    return { sub: decoded.sub, role: decoded.role }
+    return { sub: decoded.sub, role: decoded.role, tv: decoded.tv }
   }
 }
 
 export const authService = new AuthService()
+
+function ttlToMs(value: string): number {
+  const amount = Number(value.slice(0, -1))
+  const unit = value.slice(-1)
+  if (unit === "s") return amount * 1000
+  if (unit === "m") return amount * 60_000
+  if (unit === "h") return amount * 3_600_000
+  return amount * 86_400_000
+}
