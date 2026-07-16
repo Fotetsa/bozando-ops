@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -24,11 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build Shared
+        run: npm run build --workspace @bozando-ops/shared
+
       - name: Génération du client Prisma
         run: npx prisma generate --schema packages/api/prisma/schema.prisma
 
       - name: Typecheck (shared + api + web)
-        run: npm run typecheck --workspace @bozando-ops/api
+        run: npm run typecheck
 
   test:
     name: Tests
@@ -39,7 +42,7 @@ jobs:
         node-version: [20, 22]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup nodejs ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -49,6 +52,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build Shared
+        run: npm run build --workspace @bozando-ops/shared
 
       - name: Génération du client prisma
         run: npx prisma generate --schema packages/api/prisma/schema.prisma
