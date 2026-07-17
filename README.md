@@ -1,7 +1,7 @@
 # Bozando Ops
 
 <div align="center">
-  <img src="docs/image%20principale%20(1).png" alt="Bozando Ops interface" width="1100" />
+  <img src="docs/image%20canvas.png" alt="Bozando Ops interface" width="1100" />
   <p><strong>Visual infrastructure operations for Docker and Swarm</strong></p>
   <p>Design, review, and deploy container-based environments from a GNS3-style canvas with a clear and auditable workflow.</p>
   <p>
@@ -27,12 +27,6 @@ The platform is designed for a single VPS or a Swarm cluster and aims to make in
 
 ## Screenshots
 
-### Main canvas
-
-<div align="center">
-  <img src="docs/image%20canvas.png" alt="Bozando Ops canvas view" width="1000" />
-</div>
-
 ### Health and observability
 
 <div align="center">
@@ -56,7 +50,7 @@ A core principle of the platform is that Docker labels act as a redundant source
 On a fresh server, the installation flow is handled by the provided script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bright77777/bozando-ops/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fotetsa/hullbay/master/install.sh | sudo bash
 ```
 
 The installer is idempotent and will:
