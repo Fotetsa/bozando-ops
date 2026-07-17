@@ -11,7 +11,7 @@ import {
   Text,
   toast,
 } from "@medusajs/ui"
-import { ArrowPath, Bolt, ChartBar, Trash } from "@medusajs/icons"
+import { ArrowPath, Bolt, ChartBar, Spinner, Trash } from "@medusajs/icons"
 import { api, type ServiceHealth, type ServicePlacement, type PruneCandidate } from "../lib/api"
 import { useMutationToast } from "../lib/useMutationToast"
 import { PageHeader, PageContainer } from "../components/PageHeader"
@@ -23,12 +23,12 @@ import { PageHeader, PageContainer } from "../components/PageHeader"
  */
 export function HealthPage() {
   const qc = useQueryClient()
-  const { data: health, isLoading } = useQuery({
+  const { data: health, isLoading, refetch: refetchHealth } = useQuery({
     queryKey: ["health"],
     queryFn: api.clusterHealth,
     refetchInterval: 10_000,
   })
-  const { data: drift } = useQuery({
+  const { data: drift, refetch: refetchDrift } = useQuery({
     queryKey: ["drift"],
     queryFn: api.drift,
     refetchInterval: 15_000,
@@ -58,7 +58,10 @@ export function HealthPage() {
           <Button
             variant="secondary"
             size="small"
-            onClick={() => qc.invalidateQueries({ queryKey: ["health"] })}
+            onClick={() => {
+              refetchHealth()
+              refetchDrift()
+            }}
           >
             <ArrowPath /> Rafraîchir
           </Button>
@@ -66,7 +69,9 @@ export function HealthPage() {
       />
 
       {isLoading ? (
-        <Text>Chargement…</Text>
+        <div className="flex items-center justify-center py-16">
+          <Spinner className="animate-spin text-ui-fg-muted" />
+        </div>
       ) : !health?.swarmActive ? (
         <Container className="p-6">
           <Text className="text-ui-fg-subtle">

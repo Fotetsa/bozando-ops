@@ -105,7 +105,14 @@ export function IntegrationsPage() {
           </div>
           <div>
             <Label size="small">Utilisateur</Label>
-            <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Entrez l'identifiant utilisateur..."
+            />
+          </div>
+          <div>
+            
           </div>
           <div>
             <Label size="small">Token / mot de passe</Label>

@@ -84,6 +84,7 @@ export function ContainerForm({
               <option key={registry} value={registry} />
             ))}
           </datalist>
+          
         </div>
         <div>
           <Label size="small">Tag</Label>

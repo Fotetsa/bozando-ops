@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
-import { Badge, Button, Select, Table, Text } from "@medusajs/ui"
-import { ArrowPath, DocumentText } from "@medusajs/icons"
+import { Badge, Button, Drawer, Heading, Select, Table, Text } from "@medusajs/ui"
+import { ArrowPath, DocumentText, Spinner } from "@medusajs/icons"
 import { api, type AuditEntry } from "../lib/api"
 import { PageHeader, PageContainer } from "../components/PageHeader"
 import { ListContainer } from "../components/ListContainer"
@@ -49,6 +49,7 @@ function actionColor(action: string): "red" | "orange" | "green" | "grey" {
 export function AuditPage() {
   const [action, setAction] = useState<string>("__all")
   const [offset, setOffset] = useState(0)
+  const [detailEntry, setDetailEntry] = useState<AuditEntry | null>(null)
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["audit", action, offset],
@@ -98,6 +99,9 @@ export function AuditPage() {
             <Button variant="secondary" size="small" onClick={() => refetch()} aria-label="Rafraîchir">
               <ArrowPath /> Rafraîchir
             </Button>
+            {isFetching && !isLoading && (
+              <Spinner className="animate-spin text-ui-fg-muted" />
+            )}
           </div>
         }
       />
@@ -115,22 +119,83 @@ export function AuditPage() {
         }
       >
         <div className="overflow-x-auto px-2 pb-2" aria-busy={isFetching}>
-          <Table>
-            <Table.Header>
-              <Table.Row>
-                <Table.HeaderCell>Date</Table.HeaderCell>
-                <Table.HeaderCell>Action</Table.HeaderCell>
-                <Table.HeaderCell>Utilisateur</Table.HeaderCell>
-                <Table.HeaderCell>Cible</Table.HeaderCell>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {entries.map((e) => (
-                <AuditRow key={e.id} e={e} />
-              ))}
-            </Table.Body>
-          </Table>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Spinner className="animate-spin text-ui-fg-muted" />
+            </div>
+          ) : (
+            <Table>
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>Date</Table.HeaderCell>
+                  <Table.HeaderCell>Action</Table.HeaderCell>
+                  <Table.HeaderCell>Utilisateur</Table.HeaderCell>
+                  <Table.HeaderCell>Cible</Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {entries.map((e) => (
+                  <AuditRow key={e.id} e={e} onSelect={() => setDetailEntry(e)} />
+                ))}
+              </Table.Body>
+            </Table>
+          )}
         </div>
+        <Drawer open={!!detailEntry} onOpenChange={(open) => !open && setDetailEntry(null)}>
+          <Drawer.Content>
+            <Drawer.Header>
+              <Drawer.Title>Détail de l'évènement</Drawer.Title>
+            </Drawer.Header>
+            <Drawer.Body className="flex flex-col gap-4 overflow-y-auto">
+              {detailEntry ? (
+                <div className="space-y-4">
+                  <div>
+                    <Heading level="h3">{detailEntry.action}</Heading>
+                    <Badge color={actionColor(detailEntry.action)} size="2xsmall" className="mt-2">
+                      {detailEntry.action}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Text size="small" className="text-ui-fg-muted">
+                        Date
+                      </Text>
+                      <Text>{new Date(detailEntry.createdAt).toLocaleString()}</Text>
+                    </div>
+                    <div>
+                      <Text size="small" className="text-ui-fg-muted">
+                        Utilisateur
+                      </Text>
+                      <Text>{detailEntry.userEmail ?? "système"}</Text>
+                    </div>
+                    <div>
+                      <Text size="small" className="text-ui-fg-muted">
+                        Cible
+                      </Text>
+                      <Text>
+                        {detailEntry.projectId
+                          ? `projet ${detailEntry.projectId.slice(0, 8)}`
+                          : detailEntry.serverId
+                          ? `serveur ${detailEntry.serverId.slice(0, 8)}`
+                          : "—"}
+                      </Text>
+                    </div>
+                  </div>
+                  <div>
+                    <Text size="small" className="text-ui-fg-muted">
+                      Payload
+                    </Text>
+                    <pre className="mt-2 overflow-x-auto rounded border border-ui-border-base bg-ui-bg-subtle p-3 text-xs">
+                      {JSON.stringify(detailEntry.payload ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <Text className="text-ui-fg-subtle">Sélectionnez un évènement pour voir les détails.</Text>
+              )}
+            </Drawer.Body>
+          </Drawer.Content>
+        </Drawer>
         <div className="flex items-center justify-between px-6 py-3">
           <Text size="small" className="text-ui-fg-subtle">
             Page {page} / {pages}
@@ -159,7 +224,7 @@ export function AuditPage() {
   )
 }
 
-function AuditRow({ e }: { e: AuditEntry }) {
+function AuditRow({ e, onSelect }: { e: AuditEntry; onSelect: () => void }) {
   const target =
     e.projectId
       ? `projet ${e.projectId.slice(0, 8)}`
@@ -167,7 +232,10 @@ function AuditRow({ e }: { e: AuditEntry }) {
         ? `serveur ${e.serverId.slice(0, 8)}`
         : (e.payload as { email?: string; role?: string } | null)?.email ?? "—"
   return (
-    <Table.Row>
+    <Table.Row
+      className="cursor-pointer transition hover:bg-ui-bg-subtle"
+      onClick={onSelect}
+    >
       <Table.Cell>
         <Text size="small" className="whitespace-nowrap text-ui-fg-subtle">
           {new Date(e.createdAt).toLocaleString()}
