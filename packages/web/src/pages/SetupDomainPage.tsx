@@ -1,19 +1,11 @@
-import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useState } from "react"
 import { Button, Container, Heading, Input, Label, Text } from "@medusajs/ui"
 import { useMe } from "../lib/useMe"
 
 export function SetupDomainPage() {
-  const navigate = useNavigate()
-  const { me, isLoading } = useMe()
+  const { isLoading } = useMe()
   const [domain, setDomain] = useState("")
   const [saved, setSaved] = useState(false)
-
-  useEffect(() => {
-    if (me) {
-      setDomain(me.domain ?? "")
-    }
-  }, [me])
 
   if (isLoading) {
     return (

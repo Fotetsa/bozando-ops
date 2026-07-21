@@ -13,21 +13,9 @@ import { PageHeader, PageContainer } from "../components/PageHeader"
 export function SettingsPage() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me })
 
-  const [secret, setSecret] = useState<string | null>(null)
-  const [otpauth, setOtpauth] = useState<string | null>(null)
-  const [code, setCode] = useState("")
-
-  // Changement de mot de passe.
-  const [domain, setDomain] = useState("")
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-
-  const updateDomain = useMutationToast({
-    mutationFn: () => api.setDomain(domain.trim()),
-    success: "Domaine mis à jour",
-    invalidate: [["me"]],
-  })
 
   const changePw = useMutationToast({
     mutationFn: () => api.changePassword(currentPassword, newPassword),
@@ -45,13 +33,6 @@ export function SettingsPage() {
     currentPassword.length > 0 &&
     newPassword.length >= 8 &&
     newPassword === confirmPassword
-  const canSaveDomain = domain.trim().length > 0
-
-  useEffect(() => {
-    if (me) {
-      setDomain(me.domain ?? "")
-    }
-  }, [me])
 
   return (
     <PageContainer size="2xl">
@@ -70,22 +51,6 @@ export function SettingsPage() {
           <div>
             <Label size="small">Rôle</Label>
             <Text className="capitalize">{me?.role ?? "…"}</Text>
-          </div>
-          <div>
-            <Label size="small">Domaine public</Label>
-            <Input
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              placeholder="ops.exemple.com"
-            />
-            <Button
-              onClick={() => updateDomain.mutate()}
-              isLoading={updateDomain.isPending}
-              disabled={!canSaveDomain}
-              className="mt-3 self-start"
-            >
-              Enregistrer
-            </Button>
           </div>
         </div>
       </Container>

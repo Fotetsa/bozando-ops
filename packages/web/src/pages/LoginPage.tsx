@@ -30,15 +30,15 @@ export function LoginPage({ onAuthed }: { onAuthed: () => void }) {
         return
       }
       if (res.token) {
-        const me = await api.meWithToken(res.token)
+        auth.set(res.token)
+        const me = await api.me()
         if (me.mfaEnabled) {
-          auth.set(res.token)
           onAuthed()
           navigate("/", { replace: true })
         } else {
           setLoginToken(res.token)
           setPendingToken(null)
-          await loadMfaActivation(res.token)
+          await loadMfaActivation()
         }
       }
     } catch (e) {
@@ -48,9 +48,9 @@ export function LoginPage({ onAuthed }: { onAuthed: () => void }) {
     }
   }
 
-  async function loadMfaActivation(token: string) {
+  async function loadMfaActivation() {
     try {
-      const activation = await api.enrollMfaWithToken(token)
+      const activation = await api.enrollMfa()
       setSecret(activation.secret)
       setOtpauth(activation.otpauth)
       setCode("")
@@ -81,9 +81,8 @@ export function LoginPage({ onAuthed }: { onAuthed: () => void }) {
     if (!loginToken) return
     setLoading(true)
     try {
-      const res = await api.confirmMfaWithToken(loginToken, code)
-      const token = res.token ?? loginToken
-      auth.set(token)
+      await api.confirmMfa(code)
+      auth.set(loginToken)
       onAuthed()
       setLoginToken(null)
       setSecret(null)
